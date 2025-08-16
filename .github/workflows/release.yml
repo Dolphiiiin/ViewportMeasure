@@ -1,7 +1,8 @@
-name: Build Release
+name: Build and Release
 
-on: 
+on:
   workflow_dispatch:
+  pull_request:
 
 jobs:
 
@@ -11,19 +12,19 @@ jobs:
     outputs:
       config_package: ${{ steps.config_package.outputs.configPackage }}
     steps:
+      
+      # Ensure that required repository variable has been created for the Package
+      - name: Validate Package Config
+        id: config_package
+        run: |
+          if [ "${{ vars.PACKAGE_NAME }}" != "" ]; then
+            echo "configPackage=true" >> $GITHUB_OUTPUT;
+          else
+            echo "configPackage=false" >> $GITHUB_OUTPUT;
+          fi
 
-    # Ensure that required repository variable has been created for the Package
-    - name: Validate Package Config
-      id: config_package
-      run: |
-        if [ "${{ vars.PACKAGE_NAME }}" != "" ]; then
-          echo "configPackage=true" >> $GITHUB_OUTPUT;
-        else
-          echo "configPackage=false" >> $GITHUB_OUTPUT;
-        fi
-
-  # Build and release the Package
-  # If the repository is not configured properly, this job will be skipped
+  # Build the Package
+  # This job runs for both pull requests and workflow dispatch
   build:
     needs: config
     runs-on: ubuntu-latest
@@ -32,6 +33,10 @@ jobs:
     env:
       packagePath: Packages/${{ vars.PACKAGE_NAME }}
     if: needs.config.outputs.config_package == 'true'
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+      zipFile: ${{ env.zipFile }}
+      unityPackage: ${{ env.unityPackage }}
     steps:
 
       # Checkout Local Repository
@@ -42,10 +47,10 @@ jobs:
       - name: Get Version
         id: version
         uses: zoexx/github-action-json-file-properties@b9f36ce6ee6fe2680cd3c32b2c62e22eade7e590
-        with: 
-            file_path: "${{ env.packagePath }}/package.json"
-            prop_path: "version"
-    
+        with:
+          file_path: "${{ env.packagePath }}/package.json"
+          prop_path: "version"
+      
       # Configure the Environment Variables needed for releasing the Package
       - name: Set Environment Variables
         run: |
@@ -69,19 +74,66 @@ jobs:
           package-path: ${{ env.unityPackage }}
           include-files: metaList
       
+      # Upload files as artifacts for future jobs
+      - name: Upload Zip File
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-zip
+          path: ${{ env.zipFile }}
+
+      - name: Upload Unity Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-package
+          path: ${{ env.unityPackage }}
+
+      - name: Upload Package.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-json
+          path: ${{ env.packagePath }}/package.json
+
+  # Save artifacts for pull_request
+  artifact:
+    needs: build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: PR Build Complete
+        run: echo "Pull request build completed successfully. Artifacts have been saved."
+
+  # Release the package for workflow_dispatch
+  release:
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Checkout repository first - needed for git operations
+      - name: Checkout
+        uses: actions/checkout@3df4ab11eba7bda6032a0b82a6bb43b11571feac
+
+      # Download all artifacts from the build job
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
       # Make a release tag of the version from the package.json file 
       - name: Create Tag
         id: tag_version
         uses: rickstaa/action-create-tag@88dbf7ff6fe2405f8e8f6c6fdfd78829bc631f83
         with:
-          tag: "${{ env.version }}"
+          tag: "${{ needs.build.outputs.version }}"
       
       # Publish the Release to GitHub
       - name: Make Release
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844
         with:
+          draft: true
           files: |
-            ${{ env.zipFile }}
-            ${{ env.unityPackage }}
-            ${{ env.packagePath }}/package.json
-          tag_name: ${{ env.version }}
+            artifacts/package-zip/${{ needs.build.outputs.zipFile }}
+            artifacts/unity-package/${{ needs.build.outputs.unityPackage }}
+            artifacts/package-json/package.json
+          tag_name: ${{ needs.build.outputs.version }}
