@@ -1,0 +1,13 @@
+{
+  "name": "com.dolphiiiin.viewport-measure",
+  "displayName": "Viewport Measure",
+  "version": "1.0.0",
+  "unity": "2022.3",
+  "description": "",
+  "vrchatVersion": "2022.1.1",
+  "author": {
+    "name": "Dolphiiiin",
+    "email": "42102311+Dolphiiiin@users.noreply.github.com",
+    "url": "dolphiiiin.github.io"
+  }
+}
